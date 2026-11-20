@@ -1,86 +1,87 @@
-# 学习通视频与章节测验助手（V4 状态机 · Edge 控制台 + DeepSeek 本地服务版）
+# 学习通自动刷课与测验助手（Edge 控制台 + DeepSeek 版）
 
-一个基于 [chaolucky18/xuexitongScript](https://github.com/chaolucky18/xuexitongScript) 重构的免油猴（Tampermonkey）学习通课程辅助工具，由 **Edge 浏览器控制台脚本** 与 **本地 Node.js DeepSeek 代理服务** 组成。API Key 仅在终端输入并驻留内存，不写入任何文件或日志，支持视频自适应播放、文档节点推进与 AI 章节测验作答。
+这是一个无需安装油猴（Tampermonkey）的学习通辅助工具，基于 [chaolucky18/xuexitongScript](https://github.com/chaolucky18/xuexitongScript) 改写优化。通过 **本地小服务** 连接 **Edge 浏览器控制台脚本**，实现自动播放视频、自动跳过纯文档页，以及调用 DeepSeek 自动做章节测验。
 
-> **免责声明**：本项目仅用于前端自动化研究与页面脚本调试，请遵守所在学校及目标平台的使用规定。
+你的 DeepSeek API Key 只在启动时输入并保存在电脑内存中，不会写入任何文件或日志。
 
----
-
-## 核心功能改进（V4 相比原版）
-
-### 1. 有限状态机驱动，消除并发与重复跳转
-- 引入 9 状态有限状态机（`IDLE`、`LOADING_NODE`、`PLAYING_VIDEO`、`WAITING_DOCUMENT`、`PAUSED_MANUAL`、`ADVANCING`、`COMPLETED`、`ERROR`、`DESTROYED`），配合 `_runEpoch` 与 `AbortController` 隔离异步周期，解决页面切换、步骤页签点击与视频结束事件并发导致的重复触发问题。
-
-### 2. 视频三模式自适应播放（全程静音 + 播放保活）
-脚本自动检测播放器与页面限制并切换策略，且在失焦、切出标签页或暂停时自动恢复：
-
-| 播放模式 | 触发条件 | 执行策略 |
-| :--- | :--- | :--- |
-| **模式 A：可拖拽视频** | 进度条允许拖拽且未禁用快进 | 自动跳转至视频末尾前 3 秒等待完成上报 |
-| **模式 B：不可拖拽但可倍速** | 禁止拖动进度条，但允许倍速 | 自动切换至 `2x` 倍速播放（`nonDraggablePlaybackRate`） |
-| **模式 C：禁倍速视频** | 检测到 `doublespeed=0`、隐藏倍速控件或倍速触发暂停/重置 | 自动回退至 `1x` 正常速度播放，避免触发平台拦截 |
-
-### 3. 普通文档 / PPT 节点自动推进
-识别到无视频、无测验的文档或 PPT 节点时，状态机自动进入 `WAITING_DOCUMENT`，延时 `5000ms` 后自动推进至下一节（可通过 `app.configs.autoAdvanceNoVideo = false` 关闭）。
-
-### 4. DeepSeek AI 章节测验分级作答与防复制还原
-- **防复制字符还原**：针对学习通网页常见的汉字替换或夹杂字符，引导 `deepseek-flash` 模型（`reasoning_effort: 'low'`）先还原题意再输出结构化 JSON 答案（单批上限 30 题）。
-- **情况 1（全为客观题）**：自动识别单选、多选、判断题，校验题量与选项后自动勾选、点击“提交”并处理二次确认弹窗，待成绩或完成标记出现后自动进入下一节。
-- **情况 2（含主观题/混合题型）**：仅勾选可识别的客观题，**不提交答案**，在控制台提示后跳过当前节点等待人工处理，避免误交。
-- **手动接管开关**：设置 `app.configs.pauseOnAssessment = true` 可在遇到测验时直接暂停。
-
-### 5. 整页跳转自动恢复与本地安全校验
-- **辅助窗口保活**：首次运行会打开“学习通自动任务辅助窗口”，课程页整页跳转且 `#coursetree` 就绪后自动重新注入脚本。
-- **本地服务安全加固**：`deepseek-local.mjs` 仅监听 `127.0.0.1:37841`，仅放行 `https://*.chaoxing.com` 来源请求，并在每次启动时随机生成 48 位十六进制 `LOCAL_TOKEN` 自动写入 `xuexitong-console.js` 进行校验。
+> **免责声明**：本项目仅供学习研究与脚本调试使用，请遵守学校及平台规定，切勿用于违规用途。
 
 ---
 
-## 安装与使用说明
+## 相比原版的主要改进
 
-### 1. 环境准备
-- **Node.js 18+**（支持 ES Modules 与原生 `fetch`）
-- **Microsoft Edge**（或其他 Chromium 内核浏览器）
-- 有效的 [DeepSeek API Key](https://platform.deepseek.com/)
+1. **运行更稳，不再重复乱跳**：重写了脚本的运行流程，解决切换章节、点错页签或网速慢时容易卡死、重复跳转的问题。
+2. **视频自动适配（全程静音）**：
+   - **允许拖进度条的视频**：自动跳到结尾前 3 秒等待完成。
+   - **不让拖进度条的视频**：自动尝试 2 倍速播放；如果页面连倍速也禁止，会自动退回 1 倍速正常播放，避免被平台拦截。
+   - **切屏或意外暂停**：检测到视频停住或失去焦点时会自动恢复播放。
+3. **纯文档 / PPT 页面自动翻页**：遇到没有视频和测验的课件页面，等待 5 秒后自动进入下一节。
+4. **DeepSeek 测验分级处理，防止误交**：
+   - 针对学习通题目的防复制干扰字，先让模型还原题意再作答（单次最多 30 题）。
+   - **全是单选/多选/判断题**：自动勾选、提交并确认弹窗，等成绩出来后再进入下一节。
+   - **包含填空、简答等主观题**：只帮你把里面的客观题选上，**不会自动提交**，而是直接跳过等待人工处理。
+5. **跨页自动续跑**：首次运行会打开一个“辅助窗口”，遇到整页跳转时尝试自动重新启动脚本，不用每次手动重贴。
 
-### 2. 下载与目录结构
-1. 停用浏览器中此前安装的学习通油猴（Tampermonkey）脚本，避免冲突。
-2. 克隆本仓库或下载 ZIP 并**全部解压到同一文件夹**，确保包含以下 4 个文件：
-   - `start-local-service.cmd`（Windows 启动器）
-   - `deepseek-local.mjs`（本地 HTTP 代理服务）
-   - `deepseek-request.mjs`（DeepSeek API 请求模块）
-   - `xuexitong-console.js`（Edge 控制台执行脚本）
+---
 
-### 3. 启动本地 DeepSeek 服务
-1. 双击运行 **`start-local-service.cmd`**（macOS / Linux 在项目目录运行 `node deepseek-local.mjs`）。
-2. 在终端粘贴 **DeepSeek API Key** 并按 `Enter`（输入不显示字符）。
-3. 看到 `本地服务已启动：http://127.0.0.1:37841` 后**保持窗口打开**。
+## 安装与使用步骤
 
-> 每次重启本地服务都会刷新 `xuexitong-console.js` 中的 `LOCAL_TOKEN`，重启后需重新复制一次脚本。
+### 1. 准备工作
+- 电脑已安装 **Node.js 18 或更高版本**（用于运行本地服务）。
+- 使用 **Microsoft Edge** 浏览器。
+- 准备一个可用的 [DeepSeek API Key](https://platform.deepseek.com/)。
+- 如果浏览器里装过学习通油猴脚本，请**先停用**，避免互相冲突。
 
-### 4. 在 Edge 控制台运行脚本
-1. 用记事本打开同目录的 **`xuexitong-console.js`**，按 `Ctrl + A`、`Ctrl + C` 复制完整内容。
-2. 在 Edge 打开学习通课程播放页（URL 含 `/mycourse/studentstudy`），按 **`F12`** → **`Console`**，粘贴后确认末尾为 `})();` 再按 `Enter`。
-3. 按浏览器提示允许课程页**访问本地网络**与**打开弹出窗口**（“学习通自动任务辅助窗口”）。
-4. 注意：确认脚本正常启动后，**建议按`F12`关闭开发者工具**——关闭后脚本仍会在页面后台持续运行，且可避免后续触发学习通页面的反调试 `debugger` 暂停。
+### 2. 下载项目
+下载本项目全部文件并**解压到同一个文件夹**（不要直接在压缩包里运行），确保包含以下 4 个文件：
+- `start-local-service.cmd`（Windows 启动脚本）
+- `deepseek-local.mjs`（本地服务程序）
+- `deepseek-request.mjs`（DeepSeek 请求模块）
+- `xuexitong-console.js`（浏览器控制台脚本）
 
-### 5. 常用控制台指令与排查
+### 3. 启动本地服务
+1. 双击 **`start-local-service.cmd`**（Mac / Linux 用户在文件夹内打开终端运行 `node deepseek-local.mjs`）。
+2. 在黑框里粘贴你的 **DeepSeek API Key**，按 `Enter`（输入时屏幕不会显示字符）。
+3. 看到 `本地服务已启动：http://127.0.0.1:37841` 后，**保持这个黑框开着不要关闭**。
+
+> 每次关闭后重新启动本地服务，都会生成新的连接口令并自动更新 `xuexitong-console.js`，所以重启服务后需要重新复制一次脚本。
+
+### 4. 在浏览器中运行
+1. 用记事本打开 **`xuexitong-console.js`**，按 `Ctrl + A` 全选、`Ctrl + C` 复制全部内容。
+2. 在 Edge 打开学习通课程播放页，按 **`F12`** 打开开发者工具，切换到 **`Console`（控制台）**。
+3. 粘贴脚本，确认最后一行是 `})();` 后按 `Enter` 运行。
+4. 浏览器如果弹出提示，请点击允许**访问本地网络**和**打开弹出窗口**（“学习通自动任务辅助窗口”）。
+5. 确认脚本正常启动后，**建议按`F12`关闭开发者工具**——关闭后脚本仍会在页面后台持续运行，且可避免后续触发学习通页面的反调试 `debugger` 暂停。
+
+### 5. 常用指令与小技巧
+在关闭 F12 前，如果需要手动控制或排查，可以在控制台输入：
 
 ```javascript
-app.inspectQuiz()                     // 查看当前识别到的测验题目与选项
-app.state                             // 查看当前状态机状态
-app.resume()                          // 从暂停或异常状态恢复并进入下一节
-app.nextUnit()                        // 强制跳至下一小节
-app.configs.pauseOnAssessment = true  // 遇到测验时暂停，交由人工处理
-app.destroy()                         // 停止脚本（或直接刷新页面）
+app.inspectQuiz()                     // 查看当前页面识别到了哪些题目
+app.resume()                          // 暂停或出错后手动继续下一节
+app.nextUnit()                        // 手动强制跳到下一节
+app.configs.pauseOnAssessment = true  // 遇到所有测验都暂停，自己手动做
+app.destroy()                         // 停止脚本（或直接刷新网页）
 ```
 
-- **`Uncaught SyntaxError: missing ) after argument list`**：复制不完整或混入多余字符，请重新全选复制 `xuexitong-console.js` 并确认结尾为 `})();`。
-- **提示“已在调试程序中暂停”**：在 Edge 开发者工具按 **`F8`** 恢复执行，并检查 `Sources` 面板是否误开启“遇到异常时暂停”。
-- **无关控制台提示**：`work-css-tpl.cssx 404`、`highlight.js deprecated`、`JQMIGRATE` 为页面自身提示，非脚本报错；脚本停止时会输出明确的红色错误说明。
-- **费用与准确率提示**：调用 DeepSeek API 会产生少量 Token 费用，AI 作答亦可能出错，建议首次使用时观察一轮完整提交流程。
+- **提示“已在调试程序中暂停”**：这是因为没关 F12 触发了学习通的反调试检测。按 **`F8`** 恢复运行，然后直接把 F12 关掉即可。
+- **粘贴报 `SyntaxError` 错误**：说明没复制完整，请重新打开文件用 `Ctrl + A` 全选复制。
+
+---
+
+## 目前的不足与未解决的问题
+
+在使用前请了解以下已知局限：
+
+1. **整页跳转自动续跑尚未在真实课程中充分验证**：辅助窗口的自动恢复功能目前仅通过模拟测试，真实课程长时间连续运行时仍有可能失效，必要时需手动重新粘贴一次脚本。
+2. **无法处理图片题、材料题和主观题**：脚本只把题目文字发给 DeepSeek，图片和题目框以外的阅读材料不会发送；遇到填空、简答等主观题时无法作答，只能跳过留给人工处理。
+3. **部分播放器静音可能不彻底**：脚本会尝试自动静音，但如果课程播放器使用了独立的音频通道或中途重建了播放器，仍可能需要你手动点一下网页播放器上的静音按钮。
+4. **重启服务后操作略繁琐**：为了安全，API Key 不保存且每次重启都会更换本地连接口令，因此每次重开本地服务都要重新输入 Key 并重新复制 `xuexitong-console.js`。
+5. **依赖网页结构与 AI 准确率**：如果学习通更新页面代码，脚本可能会识别失败并停止；DeepSeek 也有答错的可能，且每次做题都会消耗少量 API 额度，建议首次使用先盯一轮。
+6. **一键启动仅适配 Windows**：`start-local-service.cmd` 仅支持 Windows 系统，Mac 和 Linux 用户需要手动在终端输入命令启动。
 
 ---
 
 ## 致谢
 
-本项目基于 **[chaolucky18](https://github.com/chaolucky18)** 开源的 **[chaolucky18/xuexitongScript](https://github.com/chaolucky18/xuexitongScript)** 进行重构与功能扩展。感谢原作者在 `#coursetree` 目录遍历、嵌套 `iframe` 视频探测、静音兜底策略及 DeepSeek 本地代理方案上的开源贡献，欢迎前往原仓库点亮 Star 支持！
+本项目基于 [**chaolucky18**](https://github.com/chaolucky18) 开源的 [**chaolucky18/xuexitongScript**](https://github.com/chaolucky18/xuexitongScript) 进行改写与功能增强。感谢原作者在课程目录识别、视频播放恢复以及 DeepSeek 本地调用方案上的开源贡献，欢迎前往原仓库点亮 Star 支持！
